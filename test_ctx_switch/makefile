@@ -12,7 +12,6 @@ VMLINUX = vmlinux.h
 all: ctxswitch
 
 $(VMLINUX): /sys/kernel/btf/vmlinux
-	@echo "Generating vmlinux.h ..."
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX)
 
 $(BPF_OBJ): ctxswitch.bpf.c $(VMLINUX)
@@ -23,3 +22,4 @@ ctxswitch: ctxswitch.c $(BPF_OBJ)
 
 clean:
 	rm -f *.o ctxswitch $(VMLINUX)
+
