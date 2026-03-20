@@ -1,6 +1,5 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
-// #include <bpf/bpf_tracing.h>
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -20,8 +19,8 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
     struct event *e;
 
     e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-    if (!e)
-	return 0;
+    if (!e) 
+        return 0;
 
     bpf_probe_read_kernel(e->prev, sizeof(e->prev), ctx->prev_comm);
     bpf_probe_read_kernel(e->next, sizeof(e->next), ctx->next_comm);
