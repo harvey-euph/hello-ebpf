@@ -9,20 +9,3 @@ sudo apt install -y \
     gcc make linux-tools-common linux-tools-generic
 ```
 
-# Build
-
-```sh
-make
-```
-
-# Execution
-```sh
-sudo ./ctxswitch
-```
-
-# Observation
-
-```sh
-sudo cat /sys/kernel/debug/tracing/trace_pipe
-```
-
