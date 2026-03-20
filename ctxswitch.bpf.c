@@ -10,9 +10,9 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 {
     char prev[TASK_COMM_LEN];
     char next[TASK_COMM_LEN];
-
-    __builtin_memcpy(prev, ctx->prev_comm, TASK_COMM_LEN);
-    __builtin_memcpy(next, ctx->next_comm, TASK_COMM_LEN);
+    
+    bpf_probe_read_kernel(prev, sizeof(prev), ctx->prev_comm);
+    bpf_probe_read_kernel(next, sizeof(next), ctx->next_comm);
 
     bpf_printk("switch: %s -> %s\n", prev, next);
 
