@@ -1,13 +1,25 @@
-BPF_CLANG ?= clang
-BPF_CFLAGS ?= -O2 -g -target bpf
+CLANG ?= clang
+CC ?= gcc
 
-all: ctxsyscall ctxsyscall.bpf.o
+CFLAGS = -O2 -g
+BPF_CFLAGS = -O2 -g -target bpf
 
-ctxsyscall.bpf.o: ctxsyscall.bpf.c
-	$(BPF_CLANG) $(BPF_CFLAGS) -c $< -o $@
+LIBS = -lbpf -lelf
 
-ctxsyscall: ctxsyscall.c
-	cc -O2 -g $< -o $@ -lbpf -lelf
+BPF_OBJ = ctxsyscall.bpf.o
+VMLINUX = vmlinux.h
+
+all: ctxsyscall
+
+$(VMLINUX): /sys/kernel/btf/vmlinux
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $(VMLINUX)
+
+$(BPF_OBJ): ctxsyscall.bpf.c $(VMLINUX)
+	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+
+ctxsyscall: ctxsyscall.c $(BPF_OBJ)
+	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
 
 clean:
-    rm -f ctxsyscall ctxsyscall.bpf.o
+	rm -f *.o ctxsyscall $(VMLINUX)
+

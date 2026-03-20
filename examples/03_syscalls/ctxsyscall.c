@@ -17,6 +17,7 @@ struct event {
 
 static void handle_sig(int sig) {
     running = 0;
+    exit(0);
 }
 
 static int handle_event(void *ctx, void *data, size_t len)
@@ -56,7 +57,7 @@ int main(int argc, char **argv)
     }
 
     prog = bpf_object__find_program_by_name(obj, "trace_sys_enter");
-    link = bpf_program__attach_tracepoint(prog, "syscalls", "sys_enter");
+    link = bpf_program__attach_tracepoint(prog, "raw_syscalls", "sys_enter");
     if (!link) {
         fprintf(stderr, "Failed to attach tracepoint\n");
         return 1;
