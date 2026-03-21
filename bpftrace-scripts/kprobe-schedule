@@ -1,0 +1,8 @@
+#! /usr/bin/bash
+
+sudo bpftrace -e '
+kprobe:schedule {
+    printf("schedule() cpu=%d pid=%d comm=%s\n", cpu, pid, comm);
+}
+'
+

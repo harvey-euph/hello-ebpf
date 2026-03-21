@@ -1,0 +1,10 @@
+#! /usr/bin/bash
+
+sudo bpftrace -e '
+tracepoint:sched:sched_switch {
+    printf("[%d] %s[%d] (%s) -> %s[%d]\n", cpu,
+	args->prev_comm, args->prev_pid,
+	(args->prev_state & 0xff) ? "SLEEP" : "PREEMPT",
+	args->next_comm, args->next_pid);
+}
+'

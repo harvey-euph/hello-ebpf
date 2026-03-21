@@ -1,0 +1,11 @@
+#! /usr/bin/bash
+
+sudo bpftrace -e '
+tracepoint:syscalls:sys_enter_execve {
+    $ppid  = curtask->parent->pid;
+    $pcomm = curtask->parent->comm;
+
+    printf("pid=%d %s -> pid=%d ", $ppid, $pcomm, pid); 
+    join(args->argv);
+}
+'

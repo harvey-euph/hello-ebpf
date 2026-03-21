@@ -1,0 +1,8 @@
+#! /usr/bin/bash
+
+sudo bpftrace -e '
+tracepoint:sched:sched_process_exec {
+    printf("EXEC: pid=%d comm: %s -> file: %s \n",
+    args->pid, comm, str(args->filename));
+}
+'
