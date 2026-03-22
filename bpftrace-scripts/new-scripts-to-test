@@ -1,0 +1,35 @@
+#! /usr/bin/bash
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_openat { printf("%s pid=%d open %s\n", comm, pid, str(args->filename)); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_read { printf("%s pid=%d read fd=%d size=%d\n", comm, pid, args->fd, args->count); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_write { printf("%s pid=%d write fd=%d size=%d\n", comm, pid, args->fd, args->count); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_close { printf("%s pid=%d close fd=%d\n", comm, pid, args->fd); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_execve { printf("%s pid=%d exec %s\n", comm, pid, str(args->filename)); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_clone { printf("%s pid=%d fork/clone\n", comm, pid); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_exit { printf("%s pid=%d exit code=%d\n", comm, pid, args->error_code); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_connect { printf("%s pid=%d connect fd=%d\n", comm, pid, args->fd); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_accept { printf("%s pid=%d accept fd=%d\n", comm, pid, args->fd); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_mmap { printf("%s pid=%d mmap size=%d\n", comm, pid, args->len); }'
+
+bpftrace -e 'tracepoint:syscalls:sys_enter_execve /comm=="nginx"/ { printf("%s exec %s\n", comm, str(args->filename)); }'
+
+bpftrace -e '
+tracepoint:syscalls:sys_enter_read { @start[tid] = nsecs; }
+tracepoint:syscalls:sys_exit_read /@start[tid]/ {
+    @lat = hist(nsecs - @start[tid]);
+    delete(@start[tid]);
+}'
+
+bpftrace -e '
+tracepoint:syscalls:sys_enter_openat {
+    @files[str(args->filename)] = count();
+}'
