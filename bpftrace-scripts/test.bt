@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_read {
+    @start[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_read /@start[tid]/ {
+    @lat = hist(nsecs - @start[tid]);
+    delete(@start[tid]);
+}
+
+interval:s:5 {
+    print(@lat);
+    clear(@lat);
+}
