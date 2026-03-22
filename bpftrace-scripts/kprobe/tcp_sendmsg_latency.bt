@@ -1,0 +1,20 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: tcp_sendmsg
+ * 目的：觀察發送封包時間，練習 latency tracing
+ */
+
+kprobe:tcp_sendmsg {
+    @start[tid] = nsecs;
+}
+
+kretprobe:tcp_sendmsg /@start[tid]/ {
+    @latency_us = hist((nsecs - @start[tid])/1000);
+    delete(@start[tid]);
+}
+
+interval:s:5 {
+    printf("\nTCP sendmsg latency (us):\n");
+    print(@latency_us);
+    clear(@latency_us);
+}

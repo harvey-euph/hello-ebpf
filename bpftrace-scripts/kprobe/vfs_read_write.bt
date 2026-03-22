@@ -1,0 +1,24 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: vfs_read / vfs_write
+ * 目的：觀察 kernel VFS 層 I/O 行為
+ */
+
+kprobe:vfs_read {
+    @reads[args->fd] = count();
+}
+
+kprobe:vfs_write {
+    @writes[args->fd] = count();
+}
+
+interval:s:5 {
+    printf("\nVFS reads per fd:\n");
+    print(@reads, 5);
+
+    printf("\nVFS writes per fd:\n");
+    print(@writes, 5);
+
+    clear(@reads);
+    clear(@writes);
+}

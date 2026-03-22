@@ -1,0 +1,21 @@
+#!/usr/bin/env bpftrace
+
+BEGIN {
+    printf("Monitoring execve...\n");
+}
+
+tracepoint:syscalls:sys_enter_execve {
+    @execs[comm] = count();
+    @cmd[str(args->filename)] = count();
+}
+
+interval:s:10 {
+    printf("\nTop processes executing:\n");
+    print(@execs, 10);
+
+    printf("\nTop executed binaries:\n");
+    print(@cmd, 10);
+
+    clear(@execs);
+    clear(@cmd);
+}

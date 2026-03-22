@@ -1,0 +1,20 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_write {
+    @fd_count[args->fd] = count();
+
+    if (args->count > 4096) {
+        @large_writes = count();
+    }
+}
+
+interval:s:5 {
+    printf("\nTop write fds:\n");
+    print(@fd_count, 5);
+
+    printf("Large writes (>4KB): ");
+    print(@large_writes);
+
+    clear(@fd_count);
+    clear(@large_writes);
+}

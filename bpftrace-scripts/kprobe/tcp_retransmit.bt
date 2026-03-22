@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: tcp_retransmit_skb
+ * 目的：觀察 TCP 層重傳事件，練習 kprobe attach
+ */
+
+kprobe:tcp_retransmit_skb {
+    @retransmits = count();
+}
+
+interval:s:5 {
+    printf("\nTCP retransmits count: ");
+    print(@retransmits);
+    clear(@retransmits);
+}

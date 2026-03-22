@@ -1,0 +1,16 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_connect {
+    @start[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_connect /@start[tid]/ {
+    @lat = hist((nsecs - @start[tid]) / 1000); // us
+    delete(@start[tid]);
+}
+
+interval:s:5 {
+    printf("\nTCP connect latency (us):\n");
+    print(@lat);
+    clear(@lat);
+}

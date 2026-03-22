@@ -1,0 +1,14 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: finish_task_switch
+ * 目的：測量 task 被 switch out → switch in 的延遲
+ */
+
+kprobe:finish_task_switch {
+    @switches[comm] = count();
+}
+interval:s:5 {
+    printf("\nTask switches per process:\n");
+    print(@switches, 5);
+    clear(@switches);
+}

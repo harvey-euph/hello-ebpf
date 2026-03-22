@@ -1,0 +1,25 @@
+#!/usr/bin/env bpftrace
+/*
+ * uprobe: malloc in glibc
+ * 目的：
+ *   - 觀察各 process malloc 分配大小
+ *   - 建立 histogram 分布
+ */
+
+BEGIN {
+    printf("Tracing malloc() calls... Ctrl-C to end.\n");
+}
+
+/* attach 到 glibc malloc */
+uprobe:/usr/lib/x86_64-linux-gnu/libc.so.6:malloc
+{
+    @size[comm] = hist(arg0);  // arg0 = size
+}
+
+/* 每 5 秒打印 histogram */
+interval:s:5
+{
+    printf("\nMalloc size distribution per process:\n");
+    print(@size);
+    clear(@size);
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:sched:sched_wakeup {
+    @enqueue[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch /@enqueue[args->next_pid]/ {
+    @lat = hist((nsecs - @enqueue[args->next_pid]) / 1000);
+    delete(@enqueue[args->next_pid]);
+}
+
+interval:s:5 {
+    printf("\nRun queue latency (us):\n");
+    print(@lat);
+    clear(@lat);
+}

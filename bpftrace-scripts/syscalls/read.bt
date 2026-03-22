@@ -1,0 +1,11 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_read {
+    @read_size = hist(args->count);
+}
+
+interval:s:5 {
+    printf("\nRead size distribution:\n");
+    print(@read_size);
+    clear(@read_size);
+}

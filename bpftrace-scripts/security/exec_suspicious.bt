@@ -1,0 +1,6 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_execve 
+/str(args->filename) == "/bin/sh" || str(args->filename) == "/bin/bash"/ {
+    printf("*Suspicious shell execution: %s pid=%d\n", comm, pid);
+}

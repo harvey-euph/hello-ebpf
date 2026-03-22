@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: do_sys_open
+ * 目的：直接觀察 kernel open function 的調用
+ */
+
+kprobe:do_sys_open {
+    @open_count[comm] = count();
+}
+
+interval:s:5 {
+    printf("\nOpen calls per process:\n");
+    print(@open_count, 5);
+    clear(@open_count);
+}

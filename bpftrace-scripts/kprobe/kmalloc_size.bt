@@ -1,0 +1,15 @@
+#!/usr/bin/env bpftrace
+/*
+ * kprobe: kmalloc
+ * 目的：觀察 kernel 動態記憶體分配大小
+ */
+
+kprobe:kmalloc {
+    @kmalloc_size[args->size] = count();
+}
+
+interval:s:5 {
+    printf("\nkmalloc size histogram:\n");
+    print(@kmalloc_size);
+    clear(@kmalloc_size);
+}

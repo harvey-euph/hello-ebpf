@@ -1,0 +1,19 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:sched:sched_switch {
+    if (args->prev_state == 0) {
+        // TASK_RUNNING
+        @start[args->prev_pid] = nsecs;
+    }
+
+    if (@start[args->next_pid]) {
+        @offcpu = hist((nsecs - @start[args->next_pid]) / 1000);
+        delete(@start[args->next_pid]);
+    }
+}
+
+interval:s:5 {
+    printf("\nOff-CPU time (us):\n");
+    print(@offcpu);
+    clear(@offcpu);
+}
