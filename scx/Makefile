@@ -1,9 +1,14 @@
 CLANG ?= clang
-LLC ?= llc
 BPFTOOL ?= bpftool
 
+LINUX_SRC ?= ~/linux
+
 CFLAGS = -O2 -g -Wall
-BPF_CFLAGS = -target bpf -D__BPF_TRACING__
+BPF_CFLAGS = -target bpf -D__BPF_TRACING__ \
+	-I$(LINUX_SRC)/tools/sched_ext/include \
+	-I$(LINUX_SRC)/tools/lib \
+	-I$(LINUX_SRC)/tools/include \
+	-I$(LINUX_SRC)/tools/include/uapi
 
 all: scx
 
