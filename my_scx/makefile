@@ -20,7 +20,7 @@ INCLUDES := \
 	-I$(KDIR)/tools/sched_ext/include
 
 LDFLAGS := \
-	$(LIBBPF)/libbpf.a \
+	$(LIBBPF)/bpf/libbpf.a \
 	-lelf -lz
 
 # ------------------------
@@ -55,7 +55,7 @@ loader: loader.c sched_ext.skel.h
     -I$(KDIR)/tools/include \
     -I$(KDIR)/tools/include/uapi \
     -o loader \
-    $(LIBBPF)/libbpf.a \
+    $(LIBBPF)/bpf/libbpf.a \
     -lelf -lz
 
 clean:
