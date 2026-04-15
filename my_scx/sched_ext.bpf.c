@@ -12,25 +12,16 @@ struct {
     __type(value, u32);
 } queue SEC(".maps");
 
-// ✅ NOTE: 不用 BPF_STRUCT_OPS
 SEC("struct_ops/enqueue")
 void enqueue(struct task_struct *p, u64 enq_flags)
 {
-    u32 pid = p->pid;
-    bpf_map_push_elem(&queue, &pid, 0);
+    scx_bpf_dispatch(p, SCX_DSQ_GLOBAL, 0, 0);
 }
 
 SEC("struct_ops/dispatch")
 void dispatch(s32 cpu, struct task_struct *prev)
 {
-    u32 pid;
-
-    if (bpf_map_pop_elem(&queue, &pid) == 0) {
-        struct task_struct *p = bpf_task_from_pid(pid);
-        if (p) {
-            scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, 0, 0);
-        }
-    }
+    /* nothing needed for simple global DSQ */
 }
 
 // struct_ops registration
