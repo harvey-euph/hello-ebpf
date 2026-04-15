@@ -15,7 +15,7 @@ minimal.bpf.o: sched_ext.bpf.c vmlinux.h
 		-I$(KERNEL_HEADERS) \
 		-I$(KERNEL_HEADERS)/tools/include \
 		-I$(KERNEL_HEADERS)/tools/lib \
-		-D__TARGET_ARCH_$(shell uname -m | sed 's/x86_64/x86/;s/aarch64/arm64/;s/armv.*/arm/') \
+		-D__TARGET_ARCH_$(shell uname -m | sed 's/x86_64/x86/;s/aarch64/arm64/;s/arm.*/arm/') \
 		-c $< -o $@
 
 minimal.skel.h: minimal.bpf.o
