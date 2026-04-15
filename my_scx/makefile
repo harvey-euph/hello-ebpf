@@ -49,11 +49,13 @@ sched_ext.skel.h: sched_ext.bpf.o
 # userspace loader
 # ------------------------
 loader: loader.c sched_ext.skel.h
-	$(CC) -O2 -g \
-		$(INCLUDES) \
-		$< \
-		$(LDFLAGS) \
-		-o $@
+	gcc loader.c \
+    -I$(LIBBPF)/include \
+    -I/home/andy16384/linux/tools/include \
+    -I/home/andy16384/linux/tools/include/uapi \
+    -o loader \
+    $(LIBBPF)/libbpf.a \
+    -lelf -lz
 
 # ------------------------
 # clean
