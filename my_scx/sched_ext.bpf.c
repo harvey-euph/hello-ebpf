@@ -3,7 +3,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-// ==================== 重要：定義新版 BPF_STRUCT_OPS 宏 ====================
+// 正確定義 macro（這是目前 kernel 6.12+ / 6.17 標準寫法）
 #define BPF_STRUCT_OPS(name, args...) \
 	SEC("struct_ops/" #name) \
 	BPF_PROG(name, ##args)
@@ -12,33 +12,40 @@
 	SEC("struct_ops.s/" #name) \
 	BPF_PROG(name, ##args)
 
-// ==================== 共享 DSQ ====================
-#define SHARED_DSQ 0
+#define SHARED_DSQ 0ULL
 
 char _license[] SEC("license") = "GPL";
 
-BPF_STRUCT_OPS(minimal_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
+s32 BPF_STRUCT_OPS(minimal_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags)
 {
-	// 使用 kernel 內建的預設 idle CPU 選擇（最安全、最簡單）
-	s32 cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, NULL);
+	bool is_idle = false;
+	s32 cpu;
+
+	// 使用 kernel 預設 idle CPU 選擇邏輯（最安全）
+	cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+
+	// 如果找到 idle CPU，可以直接 dispatch 到 local DSQ（可選）
+	// if (is_idle)
+	//     scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, 0);
+
 	return cpu;
 }
 
-BPF_STRUCT_OPS(minimal_enqueue, struct task_struct *p, u64 enq_flags)
+void BPF_STRUCT_OPS(minimal_enqueue, struct task_struct *p, u64 enq_flags)
 {
-	// 把任務丟到全局共享 DSQ（簡單 FIFO）
-	scx_bpf_dsq_insert(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
+	// 把任務放入共享全局 DSQ（簡單 FIFO）
+	scx_bpf_dispatch(p, SHARED_DSQ, SCX_SLICE_DFL, enq_flags);
 }
 
-BPF_STRUCT_OPS(minimal_dispatch, s32 cpu, struct task_struct *prev)
+void BPF_STRUCT_OPS(minimal_dispatch, s32 cpu, struct task_struct *prev)
 {
-	// 從共享 DSQ 拿出任務到本地執行
+	// 從共享 DSQ 拿任務出來執行
 	scx_bpf_consume(SHARED_DSQ);
 }
 
-BPF_STRUCT_OPS_SLEEPABLE(minimal_init)
+s32 BPF_STRUCT_OPS_SLEEPABLE(minimal_init)
 {
-	// 建立共享 DSQ（-1 表示所有 CPU 都可使用）
+	// 建立共享 DSQ，讓所有 CPU (-1) 都可以存取
 	return scx_bpf_create_dsq(SHARED_DSQ, -1);
 }
 
