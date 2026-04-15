@@ -7,6 +7,9 @@ BPF_CFLAGS := -O2 -g -target bpf
 KDIR := /home/$(USER)/linux
 LIBBPF = $(KDIR)/tools/lib/bpf
 
+CFLAGS += -I$(LIBBPF)/include
+LDFLAGS += -L$(LIBBPF) -lbpf
+
 INCLUDES := \
 	-I./ \
 	-I$(KDIR)/tools/lib/bpf \
