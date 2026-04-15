@@ -13,7 +13,8 @@ CC ?= gcc
 BPF_CFLAGS := -O2 -g -target bpf
 
 INCLUDES := \
-	-I$(LIBBPF)/include \
+	-I./ \
+	-I$(LIBBPF) \
 	-I$(KDIR)/tools/include \
 	-I$(KDIR)/tools/include/uapi \
 	-I$(KDIR)/tools/sched_ext/include
