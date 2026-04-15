@@ -15,10 +15,7 @@ struct {
 SEC("struct_ops/enqueue")
 void enqueue(struct task_struct *p, u64 enq_flags)
 {
-    if (!p)
-        return;
-
-    scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, 0, 0);
+    scx_bpf_dsq_insert(SCX_DSQ_GLOBAL, p, 0, 0);
 }
 
 SEC("struct_ops/dispatch")
