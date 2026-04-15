@@ -4,7 +4,7 @@
 
 KDIR := /home/andy16384/linux
 
-LIBBPF := $(KDIR)/tools/lib/bpf
+LIBBPF := $(KDIR)/tools/lib
 BPFOOL := $(KDIR)/tools/bpf/bpftool/bpftool
 
 CLANG ?= clang
