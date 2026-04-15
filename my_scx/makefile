@@ -1,36 +1,30 @@
-KERNEL_HEADERS ?= /usr/src/linux-headers-$(shell uname -r)
-
 CLANG ?= clang
 BPFTOOL ?= bpftool
-LIBBPF ?= -lbpf
 
-all: vmlinux.h minimal.bpf.o minimal.skel.h loader
+CFLAGS := -O2 -g -Wall
+BPF_CFLAGS := -O2 -g -target bpf
+
+KDIR := /home/$(USER)/linux
+
+INCLUDES := \
+	-I$(KDIR)/tools/lib/bpf \
+	-I$(KDIR)/tools/include \
+	-I$(KDIR)/tools/include/uapi \
+	-I$(KDIR)/tools/sched_ext/include
+
+all: loader
 
 vmlinux.h:
 	$(BPFTOOL) btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
 
-minimal.bpf.o: sched_ext.bpf.c vmlinux.h
-	$(CLANG) -target bpf -g -O2 -Wall \
-		-I. \
-		-I$(KERNEL_HEADERS) \
-		-I$(KERNEL_HEADERS)/tools/include \
-		-I$(KERNEL_HEADERS)/tools/lib \
-		-D__TARGET_ARCH_x86 \
-		-Wno-implicit-function-declaration \
-		-c $< -o $@
+sched_ext.bpf.o: sched_ext.bpf.c vmlinux.h
+	$(CLANG) $(BPF_CFLAGS) $(INCLUDES) -c $< -o $@
 
-minimal.skel.h: minimal.bpf.o
+sched_ext.skel.h: sched_ext.bpf.o
 	$(BPFTOOL) gen skeleton $< > $@
 
-loader: loader.c minimal.skel.h
-	gcc -Wall -O2 -g \
-		-I. \
-		-I$(KERNEL_HEADERS)/tools/lib \
-		loader.c \
-		$(LIBBPF) -lelf -lz \
-		-o $@
+loader: loader.c sched_ext.skel.h
+	gcc $(CFLAGS) $< -lbpf -lelf -o $@
 
 clean:
-	rm -f *.o *.skel.h vmlinux.h loader
-
-.PHONY: all clean
+	rm -f *.o *.skel.h loader vmlinux.h
