@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <bpf/libbpf.h>
+#include <linux/types.h>
 #include "sched_ext.skel.h"
 
 int main()
