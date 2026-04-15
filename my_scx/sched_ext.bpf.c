@@ -14,15 +14,14 @@ struct {
 
 // ✅ NOTE: 不用 BPF_STRUCT_OPS
 SEC("struct_ops/enqueue")
-int enqueue(struct task_struct *p, u64 enq_flags)
+void enqueue(struct task_struct *p, u64 enq_flags)
 {
     u32 pid = p->pid;
     bpf_map_push_elem(&queue, &pid, 0);
-    return 0;
 }
 
 SEC("struct_ops/dispatch")
-int dispatch(s32 cpu, struct task_struct *prev)
+void dispatch(s32 cpu, struct task_struct *prev)
 {
     u32 pid;
 
@@ -32,8 +31,6 @@ int dispatch(s32 cpu, struct task_struct *prev)
             scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, 0, 0);
         }
     }
-
-    return 0;
 }
 
 // struct_ops registration
