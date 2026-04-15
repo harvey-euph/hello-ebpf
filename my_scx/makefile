@@ -51,15 +51,12 @@ sched_ext.skel.h: sched_ext.bpf.o
 # ------------------------
 loader: loader.c sched_ext.skel.h
 	gcc loader.c \
-    -I$(LIBBPF)/include \
-    -I/home/andy16384/linux/tools/include \
-    -I/home/andy16384/linux/tools/include/uapi \
+    -I$(KDIR)/tools/lib \
+    -I$(KDIR)/tools/include \
+    -I$(KDIR)/tools/include/uapi \
     -o loader \
     $(LIBBPF)/libbpf.a \
     -lelf -lz
 
-# ------------------------
-# clean
-# ------------------------
 clean:
 	rm -f *.o *.skel.h loader vmlinux.h
