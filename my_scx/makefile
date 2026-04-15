@@ -5,6 +5,7 @@ CFLAGS := -O2 -g -Wall
 BPF_CFLAGS := -O2 -g -target bpf
 
 KDIR := /home/$(USER)/linux
+LIBBPF = $(KDIR)/tools/lib/bpf
 
 INCLUDES := \
 	-I./ \
@@ -25,7 +26,12 @@ sched_ext.skel.h: sched_ext.bpf.o
 	$(BPFTOOL) gen skeleton $< > $@
 
 loader: loader.c sched_ext.skel.h
-	gcc $(CFLAGS) $< -lbpf -lelf -o $@
+	gcc loader.c -o loader \
+    -I$(LIBBPF)/include \
+    -I$(KDIR)/tools/include \
+    -I$(KDIR)/tools/include/uapi \
+    -L$(LIBBPF) \
+    -lbpf -lelf -lz
 
 clean:
 	rm -f *.o *.skel.h loader vmlinux.h
