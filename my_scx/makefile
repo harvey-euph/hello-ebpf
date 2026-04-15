@@ -7,6 +7,7 @@ BPF_CFLAGS := -O2 -g -target bpf
 KDIR := /home/$(USER)/linux
 
 INCLUDES := \
+	-I./ \
 	-I$(KDIR)/tools/lib/bpf \
 	-I$(KDIR)/tools/include \
 	-I$(KDIR)/tools/include/uapi \
