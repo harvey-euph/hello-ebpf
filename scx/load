@@ -30,8 +30,8 @@ sudo bpftool struct_ops register "$BPF_OBJ" /sys/fs/bpf/sched_ext
 NEW_OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
 
 if [ -n "$NEW_OPS" ]; then
-    echo "[SUCCESS] scheduler active: $NEW_OPS"
+    echo "[INFO] $NEW_OPS is actived now."
 else
-    echo "[ERROR] scheduler load failed"
+    echo "[ERROR] scheduler load failed."
     exit 1
 fi
