@@ -32,7 +32,7 @@ s32 BPF_STRUCT_OPS(sched_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wa
   bool is_idle = 0;
   s32 cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
   if (is_idle) {
-    scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SLICE, 0);
+    scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SLICE, 0);
   }
   return cpu;
 }
