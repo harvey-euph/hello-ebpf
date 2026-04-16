@@ -1,0 +1,10 @@
+#!/bin/sh
+
+OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
+
+if [ -n "$OPS" ]; then
+    echo "[INFO] stopping existing scheduler..."
+    sudo rm /sys/fs/bpf/sched_ext/sched_ops
+else 
+    echo "[INFO] No sched_ext running."
+fi
