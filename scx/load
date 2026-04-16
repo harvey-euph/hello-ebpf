@@ -1,0 +1,37 @@
+#!/bin/sh
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: $0 <scheduler.o>"
+    echo "Example: $0 build/vtime.bpf.o"
+    exit 1
+fi
+
+BPF_OBJ="$1"
+
+if [ ! -f "$BPF_OBJ" ]; then
+    echo "[ERROR] file not found: $BPF_OBJ"
+    usage
+fi
+
+OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
+
+if [ -n "$OPS" ]; then
+    echo "[INFO] scheduler already running: $OPS"
+    echo "[INFO] stopping existing scheduler..."
+    sudo rm /sys/fs/bpf/sched_ext/sched_ops
+fi
+
+echo "[INFO] loading scheduler: $BPF_OBJ"
+
+sudo bpftool struct_ops register "$BPF_OBJ" /sys/fs/bpf/sched_ext
+
+NEW_OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
+
+if [ -n "$NEW_OPS" ]; then
+    echo "[SUCCESS] scheduler active: $NEW_OPS"
+else
+    echo "[ERROR] scheduler load failed"
+    exit 1
+fi
