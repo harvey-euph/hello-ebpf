@@ -18,12 +18,11 @@ fi
 OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
 
 if [ -n "$OPS" ]; then
-    echo "[INFO] scheduler already running: $OPS"
-    echo "[INFO] stopping existing scheduler..."
+    echo "[INFO] Stopping $OPS..."
     sudo rm /sys/fs/bpf/sched_ext/sched_ops
 fi
 
-echo "[INFO] loading scheduler: $BPF_OBJ"
+echo "[INFO] Loading scheduler: $BPF_OBJ"
 
 sudo bpftool struct_ops register "$BPF_OBJ" /sys/fs/bpf/sched_ext
 
@@ -32,6 +31,6 @@ NEW_OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
 if [ -n "$NEW_OPS" ]; then
     echo "[INFO] $NEW_OPS is actived now."
 else
-    echo "[ERROR] scheduler load failed."
+    echo "[ERROR] $BPF_OBJ load failed."
     exit 1
 fi

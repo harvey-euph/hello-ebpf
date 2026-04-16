@@ -1,5 +1,9 @@
 #!/bin/sh
-#
-# Prints the currently running custom scheduler
 
-cat /sys/kernel/sched_ext/root/ops
+OPS=$(cat /sys/kernel/sched_ext/root/ops 2>/dev/null || echo "")
+
+if [ -n "$OPS" ]; then
+    echo "[INFO] $OPS is running."
+else 
+    echo "[INFO] No sched_ext running."
+fi
