@@ -10,6 +10,13 @@
 // 靜態定義最大支援的 CPU 數量
 #define MAX_CPUS 512
 
+#define BPF_STRUCT_OPS(name, args...)	\
+    SEC("struct_ops/"#name)	BPF_PROG(name, ##args)
+
+#define BPF_STRUCT_OPS_SLEEPABLE(name, args...)	\
+    SEC("struct_ops.s/"#name)				    \
+    BPF_PROG(name, ##args)
+
 // 用於追蹤每個 CPU 佇列長度的 Map (幫助做負載決策)
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
