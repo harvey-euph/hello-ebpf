@@ -64,20 +64,23 @@ int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
 int BPF_STRUCT_OPS(study_dispatch, s32 cpu, struct task_struct *prev) {
     u32 dsq_id = CPU_DSQ_OFFSET + cpu;
 
-    // 使用更新後的 dsq_consume 函式
-    if (scx_bpf_dsq_consume(dsq_id)) {
+    // 1. 從自己的 User DSQ 搬貨到 Local DSQ
+    // 如果成功搬運，回傳值會是 true (非零)
+    if (scx_bpf_dsq_move_to_local(dsq_id)) {
         return 0;
     }
 
-    u32 neighbor_cpu = (cpu + 1) % MAX_CPUS;
-    if (scx_bpf_dsq_consume(CPU_DSQ_OFFSET + neighbor_cpu)) {
+    // 2. 嘗試從鄰居 CPU 的 DSQ 偷貨
+    u32 neighbor_cpu = (cpu + 1) % scx_bpf_nr_cpu_ids(); // 使用你 list 中的 scx_bpf_nr_cpu_ids() 更精準
+    if (scx_bpf_dsq_move_to_local(CPU_DSQ_OFFSET + neighbor_cpu)) {
         return 0;
     }
 
-    scx_bpf_dsq_consume(SCX_DSQ_GLOBAL);
+    // 3. 從全局隊列搬貨
+    scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL);
+    
     return 0;
 }
-
 // 紀錄任務開始跑的瞬間
 void BPF_STRUCT_OPS(study_running, struct task_struct *p) {
     // 可以在這裡紀錄時間戳，或是增加該 CPU 的計數器
