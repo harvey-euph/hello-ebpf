@@ -87,7 +87,7 @@ void BPF_STRUCT_OPS(study_running, struct task_struct *p) {
 }
 
 SEC(".struct_ops.link")
-struct sched_ext_ops study_ops = {
+struct sched_ext_ops sched_ops = {
     .select_cpu = (void *)study_select_cpu,
     .enqueue    = (void *)study_enqueue,
     .dispatch   = (void *)study_dispatch,
