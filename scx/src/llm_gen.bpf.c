@@ -37,13 +37,14 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(study_init) {
 
 // 1. 導航階段：盡量選上次跑過的 CPU
 s32 BPF_STRUCT_OPS(study_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
-    // 如果上次跑的核心目前是閒置的，直接選它 (Cache Hot)
+    bool is_idle; // 定義一個變數來接收閒置狀態
+    
     if (scx_bpf_test_and_clear_cpu_idle(prev_cpu)) {
         return prev_cpu;
     }
     
-    // 否則，使用系統預設邏輯找一個閒置核心
-    return scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags);
+    // 傳入第 4 個參數 &is_idle
+    return scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
 }
 
 // 2. 入庫階段：根據目標 CPU 狀態決定去向
@@ -51,13 +52,10 @@ int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
     u32 cpu = bpf_get_smp_processor_id();
     u32 dsq_id = CPU_DSQ_OFFSET + cpu;
 
-    // 如果是搶佔型喚醒 (ENQ_WAKEUP)，我們希望它趕快跑
     if (enq_flags & SCX_ENQ_WAKEUP) {
-        // 直接推入 Local DSQ 待辦清單
-        scx_bpf_dispatch(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
+        scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
     } else {
-        // 否則推入該 CPU 的專屬 User DSQ (倉庫)
-        scx_bpf_dispatch(p, dsq_id, SCX_SLICE_DFL, enq_flags);
+        scx_bpf_dsq_insert(p, dsq_id, SCX_SLICE_DFL, enq_flags);
     }
     return 0;
 }
@@ -66,22 +64,17 @@ int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
 int BPF_STRUCT_OPS(study_dispatch, s32 cpu, struct task_struct *prev) {
     u32 dsq_id = CPU_DSQ_OFFSET + cpu;
 
-    // 優先：從自己的專屬倉庫拿貨
-    if (scx_bpf_consume(dsq_id)) {
+    // 使用更新後的 dsq_consume 函式
+    if (scx_bpf_dsq_consume(dsq_id)) {
         return 0;
     }
 
-    // 次選：如果自己倉庫空了，嘗試去「偷」鄰居 CPU 的任務 (簡單的負載平衡)
-    // 這裡示範偷 CPU + 1 的任務
     u32 neighbor_cpu = (cpu + 1) % MAX_CPUS;
-    if (scx_bpf_consume(CPU_DSQ_OFFSET + neighbor_cpu)) {
-        // 成功偷到別人的任務！
+    if (scx_bpf_dsq_consume(CPU_DSQ_OFFSET + neighbor_cpu)) {
         return 0;
     }
 
-    // 最後：去看看全局隊列 (SCX_DSQ_GLOBAL)
-    scx_bpf_consume(SCX_DSQ_GLOBAL);
-    
+    scx_bpf_dsq_consume(SCX_DSQ_GLOBAL);
     return 0;
 }
 
