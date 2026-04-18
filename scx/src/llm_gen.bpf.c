@@ -90,6 +90,11 @@ void BPF_STRUCT_OPS(study_running, struct task_struct *p) {
     // bpf_printk("Running: %s on CPU %d", p->comm, bpf_get_smp_processor_id());
 }
 
+void BPF_STRUCT_OPS(study_exit, struct scx_exit_info *info) {
+    // 將 info->reason 或 info->msg 透過 ringbuf 送出來
+    bpf_printk("SCX Exited! Reason: %d", info->reason);
+}
+
 SEC(".struct_ops.link")
 struct sched_ext_ops sched_ops = {
     .select_cpu = (void *)study_select_cpu,
@@ -97,6 +102,7 @@ struct sched_ext_ops sched_ops = {
     .dispatch   = (void *)study_dispatch,
     .running    = (void *)study_running,
     .init       = (void *)study_init,
+    .exit       = (void *)study_exit,
     .name       = "study_advanced_scheduler",
     .flags      = SCX_OPS_KEEP_BUILTIN_IDLE, 
 };
