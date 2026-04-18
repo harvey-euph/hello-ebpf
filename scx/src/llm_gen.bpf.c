@@ -1,44 +1,88 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
 #define MAX_CPUS 256
-#define CPU_DSQ_BASE 1000
 
-#define BPF_STRUCT_OPS(name, args...) \ 
+#define DSQ_FAST_BASE  1000
+#define DSQ_SLOW_BASE  2000
+
+#define BPF_STRUCT_OPS(name, args...) \
     SEC("struct_ops/"#name) BPF_PROG(name, ##args) 
 
-#define BPF_STRUCT_OPS_SLEEPABLE(name, args...) \ 
+#define BPF_STRUCT_OPS_SLEEPABLE(name, args...) \
     SEC("struct_ops.s/"#name) BPF_PROG(name, ##args)
-
 char _license[] SEC("license") = "GPL";
+
+/* ===================== */
+/* task state map */
+/* ===================== */
+
+struct task_ctx {
+    u64 last_enq_ts;
+    u32 wake_cnt;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+    __type(key, struct task_struct *);
+    __type(value, struct task_ctx);
+} task_ctx_map SEC(".maps");
 
 /* ===================== */
 /* helpers */
 /* ===================== */
 
-static __always_inline u32 get_cpu_dsq(u32 cpu)
+static __always_inline u32 fast_dsq(u32 cpu)
 {
-    return CPU_DSQ_BASE + cpu;
+    return DSQ_FAST_BASE + cpu;
+}
+
+static __always_inline u32 slow_dsq(u32 cpu)
+{
+    return DSQ_SLOW_BASE + cpu;
 }
 
 /* ===================== */
 /* init */
 /* ===================== */
 
-s32 BPF_STRUCT_OPS_SLEEPABLE(adv_init)
+s32 BPF_STRUCT_OPS_SLEEPABLE(policy_init)
 {
     u32 nr = scx_bpf_nr_cpu_ids();
 
-    bpf_printk("SCX adv_init: nr_cpu=%u", nr);
-
     for (u32 i = 0; i < nr && i < MAX_CPUS; i++) {
-        if (scx_bpf_create_dsq(get_cpu_dsq(i), -1)) {
-            bpf_printk("DSQ create failed cpu=%u", i);
+        if (scx_bpf_create_dsq(fast_dsq(i), -1))
             return -1;
-        }
+        if (scx_bpf_create_dsq(slow_dsq(i), -1))
+            return -1;
     }
+    return 0;
+}
+
+/* ===================== */
+/* classification */
+/* ===================== */
+
+static __always_inline int is_interactive(struct task_struct *p)
+{
+    struct task_ctx *ctx;
+    u64 now = bpf_ktime_get_ns();
+
+    ctx = bpf_task_storage_get(&task_ctx_map, p, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+    if (!ctx)
+        return 0;
+
+    u64 delta = now - ctx->last_enq_ts;
+
+    ctx->last_enq_ts = now;
+    ctx->wake_cnt++;
+
+    /* heuristic：
+     * frequent wakeup + short interval = interactive
+     */
+    if (delta < 5 * 1000 * 1000 && ctx->wake_cnt > 5)
+        return 1;
 
     return 0;
 }
@@ -47,19 +91,16 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(adv_init)
 /* select_cpu */
 /* ===================== */
 
-s32 BPF_STRUCT_OPS(adv_select_cpu,
+s32 BPF_STRUCT_OPS(policy_select_cpu,
     struct task_struct *p,
     s32 prev_cpu,
     u64 wake_flags)
 {
-    bool idle = false;
-
-    /* 強 affinity：如果 prev_cpu idle 就回去 */
     if (prev_cpu >= 0 &&
         scx_bpf_test_and_clear_cpu_idle(prev_cpu))
         return prev_cpu;
 
-    /* fallback default policy */
+    bool idle;
     return scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &idle);
 }
 
@@ -67,26 +108,26 @@ s32 BPF_STRUCT_OPS(adv_select_cpu,
 /* enqueue */
 /* ===================== */
 
-int BPF_STRUCT_OPS(adv_enqueue,
+int BPF_STRUCT_OPS(policy_enqueue,
     struct task_struct *p,
     u64 enq_flags)
 {
     u32 target = scx_bpf_task_cpu(p);
     u32 curr   = bpf_get_smp_processor_id();
 
-    /* 🔥 保護 kernel thread */
-    if (p->flags & PF_KTHREAD) {
-        scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
-        return 0;
-    }
+    int interactive = is_interactive(p);
 
-    /* 🔥 正確使用 LOCAL（只有同 CPU 才能用） */
-    if (target == curr) {
+    u32 dsq;
+
+    if (interactive)
+        dsq = fast_dsq(target);
+    else
+        dsq = slow_dsq(target);
+
+    if (target == curr)
         scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
-    } else {
-        scx_bpf_dsq_insert(p, get_cpu_dsq(target),
-                           SCX_SLICE_DFL, enq_flags);
-    }
+    else
+        scx_bpf_dsq_insert(p, dsq, SCX_SLICE_DFL, enq_flags);
 
     return 0;
 }
@@ -95,29 +136,33 @@ int BPF_STRUCT_OPS(adv_enqueue,
 /* dispatch */
 /* ===================== */
 
-int BPF_STRUCT_OPS(adv_dispatch,
+int BPF_STRUCT_OPS(policy_dispatch,
     s32 cpu,
     struct task_struct *prev)
 {
     u32 nr = scx_bpf_nr_cpu_ids();
-    u32 my_dsq = get_cpu_dsq(cpu);
 
-    /* 1️⃣ 自己的 queue（affinity） */
-    if (scx_bpf_dsq_move_to_local(my_dsq))
+    /* 1. fast path（低 latency） */
+    if (scx_bpf_dsq_move_to_local(fast_dsq(cpu)))
         return 0;
 
-    /* 2️⃣ bounded work stealing（比你原本強） */
+    /* 2. slow path */
+    if (scx_bpf_dsq_move_to_local(slow_dsq(cpu)))
+        return 0;
+
+    /* 3. steal（先偷 fast） */
 #pragma unroll
     for (int i = 1; i <= 4; i++) {
-        u32 victim = (cpu + i) % nr;
+        u32 v = (cpu + i) % nr;
 
-        if (scx_bpf_dsq_move_to_local(get_cpu_dsq(victim))) {
-            bpf_printk("CPU %d stole from %d", cpu, victim);
+        if (scx_bpf_dsq_move_to_local(fast_dsq(v)))
             return 0;
-        }
+
+        if (scx_bpf_dsq_move_to_local(slow_dsq(v)))
+            return 0;
     }
 
-    /* 3️⃣ global fallback（避免 starvation） */
+    /* 4. global fallback */
     if (scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL))
         return 0;
 
@@ -125,25 +170,13 @@ int BPF_STRUCT_OPS(adv_dispatch,
 }
 
 /* ===================== */
-/* running */
-/* ===================== */
-
-void BPF_STRUCT_OPS(adv_running,
-    struct task_struct *p)
-{
-    /* debug 用（平常關掉） */
-    // bpf_printk("Running %s on cpu %d",
-    //            p->comm, bpf_get_smp_processor_id());
-}
-
-/* ===================== */
 /* exit */
 /* ===================== */
 
-void BPF_STRUCT_OPS(adv_exit,
+void BPF_STRUCT_OPS(policy_exit,
     struct scx_exit_info *info)
 {
-    bpf_printk("SCX EXIT reason=%d", info->reason);
+    bpf_printk("policy exit reason=%d", info->reason);
 }
 
 /* ===================== */
@@ -151,13 +184,12 @@ void BPF_STRUCT_OPS(adv_exit,
 /* ===================== */
 
 SEC(".struct_ops.link")
-struct sched_ext_ops adv_ops = {
-    .select_cpu = (void *)adv_select_cpu,
-    .enqueue    = (void *)adv_enqueue,
-    .dispatch   = (void *)adv_dispatch,
-    .running    = (void *)adv_running,
-    .init       = (void *)adv_init,
-    .exit       = (void *)adv_exit,
-    .name       = "adv_scx",
+struct sched_ext_ops policy_ops = {
+    .select_cpu = (void *)policy_select_cpu,
+    .enqueue    = (void *)policy_enqueue,
+    .dispatch   = (void *)policy_dispatch,
+    .init       = (void *)policy_init,
+    .exit       = (void *)policy_exit,
+    .name       = "policy_sched",
     .flags      = SCX_OPS_KEEP_BUILTIN_IDLE,
 };
