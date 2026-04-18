@@ -3,111 +3,155 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-#define CPU_DSQ_OFFSET 100
-#define MAX_CPUS 512
-
-#define BPF_STRUCT_OPS(name, args...)	\
-    SEC("struct_ops/"#name)	BPF_PROG(name, ##args)
-
-#define BPF_STRUCT_OPS_SLEEPABLE(name, args...)	\
-    SEC("struct_ops.s/"#name)				    \
-    BPF_PROG(name, ##args)
-
-// 初始化：加 Log 確認 DSQ 是否創建成功
-s32 BPF_STRUCT_OPS_SLEEPABLE(study_init) {
-    u32 nr_cpus = scx_bpf_nr_cpu_ids();
-    bpf_printk("SCX Init: Starting to create %u DSQs", nr_cpus);
-
-    for (int i = 0; i < nr_cpus && i < MAX_CPUS; i++) {
-        s32 ret = scx_bpf_create_dsq(CPU_DSQ_OFFSET + i, -1);
-        if (ret) {
-            bpf_printk("SCX Init Error: Failed to create DSQ %d", i);
-            return ret;
-        }
-    }
-    bpf_printk("SCX Init: Success");
-    return 0;
-}
-
-// 導航階段：Log 出決策過程
-s32 BPF_STRUCT_OPS(study_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
-    bool is_idle;
-    bpf_printk("Select: Starting select cpu.");
-    
-    if (scx_bpf_test_and_clear_cpu_idle(prev_cpu)) {
-        // bpf_printk("Select: Task %s back to prev_cpu %d (Idle)", p->comm, prev_cpu);
-        return prev_cpu;
-    }
-    
-    s32 target = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
-    // bpf_printk("Select: Task %s -> target %d", p->comm, target);
-    return target;
-}
-
-// 入庫階段：Log 任務被丟進哪個倉庫
-int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
-    // 獲取該任務被分配到的目標 CPU (不是當前執行 enqueue 的 CPU)
-    u32 target_cpu = scx_bpf_task_cpu(p);
-    u32 dsq_id = CPU_DSQ_OFFSET + target_cpu;
-    bpf_printk("Enqueue: Starting enqueue.");
-
-    if (enq_flags & SCX_ENQ_WAKEUP) {
-        bpf_printk("Enqueue: %s (Wakeup) -> Local CPU %d", p->comm, target_cpu);
-        scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
-    } else {
-        bpf_printk("Enqueue: %s -> User DSQ %u", p->comm, dsq_id);
-        scx_bpf_dsq_insert(p, dsq_id, SCX_SLICE_DFL, enq_flags);
-    }
-    return 0;
-}
-
-// 提貨階段：這是最需要 Log 的地方
-int BPF_STRUCT_OPS(study_dispatch, s32 cpu, struct task_struct *prev) {
-    bpf_printk("Dispatch: Starting dispatch.");
-    u32 dsq_id = CPU_DSQ_OFFSET + cpu;
-
-    // 1. 試著從自己的倉庫拿
-    if (scx_bpf_dsq_move_to_local(dsq_id)) {
-        bpf_printk("Dispatch: CPU %d consumed from own DSQ %u", cpu, dsq_id);
-        return 0;
-    }
-
-    // 2. 試著偷別人的
-    u32 neighbor_cpu = (cpu + 1) % scx_bpf_nr_cpu_ids();
-    if (scx_bpf_dsq_move_to_local(CPU_DSQ_OFFSET + neighbor_cpu)) {
-        bpf_printk("Dispatch: CPU %d STOLE from CPU %d", cpu, neighbor_cpu);
-        return 0;
-    }
-
-    // 3. 全局保底
-    if (scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL)) {
-        bpf_printk("Dispatch: CPU %d picked from Global", cpu);
-        return 0;
-    }
-    
-    return 0;
-}
-
-void BPF_STRUCT_OPS(study_running, struct task_struct *p) {
-    // 這裡頻率太高，平時建議註解掉，只在抓不到任務跑時開啟
-    // bpf_printk("Running: %s on CPU %d", p->comm, bpf_get_smp_processor_id());
-}
-
-void BPF_STRUCT_OPS(study_exit, struct scx_exit_info *info) {
-    // 將 info->reason 或 info->msg 透過 ringbuf 送出來
-    bpf_printk("SCX Exited! Reason: %d", info->reason);
-}
-
-SEC(".struct_ops.link")
-struct sched_ext_ops sched_ops = {
-    .select_cpu = (void *)study_select_cpu,
-    .enqueue    = (void *)study_enqueue,
-    .dispatch   = (void *)study_dispatch,
-    .running    = (void *)study_running,
-    .init       = (void *)study_init,
-    .exit       = (void *)study_exit,
-    .name       = "study_advanced_scheduler",
-    .flags      = SCX_OPS_KEEP_BUILTIN_IDLE, 
-};
+#define MAX_CPUS 256
+#define CPU_DSQ_BASE 1000
 
 char _license[] SEC("license") = "GPL";
+
+/* ===================== */
+/* helpers */
+/* ===================== */
+
+static __always_inline u32 get_cpu_dsq(u32 cpu)
+{
+    return CPU_DSQ_BASE + cpu;
+}
+
+/* ===================== */
+/* init */
+/* ===================== */
+
+s32 BPF_STRUCT_OPS_SLEEPABLE(adv_init)
+{
+    u32 nr = scx_bpf_nr_cpu_ids();
+
+    bpf_printk("SCX adv_init: nr_cpu=%u", nr);
+
+    for (u32 i = 0; i < nr && i < MAX_CPUS; i++) {
+        if (scx_bpf_create_dsq(get_cpu_dsq(i), -1)) {
+            bpf_printk("DSQ create failed cpu=%u", i);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/* ===================== */
+/* select_cpu */
+/* ===================== */
+
+s32 BPF_STRUCT_OPS(adv_select_cpu,
+    struct task_struct *p,
+    s32 prev_cpu,
+    u64 wake_flags)
+{
+    bool idle = false;
+
+    /* 強 affinity：如果 prev_cpu idle 就回去 */
+    if (prev_cpu >= 0 &&
+        scx_bpf_test_and_clear_cpu_idle(prev_cpu))
+        return prev_cpu;
+
+    /* fallback default policy */
+    return scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &idle);
+}
+
+/* ===================== */
+/* enqueue */
+/* ===================== */
+
+int BPF_STRUCT_OPS(adv_enqueue,
+    struct task_struct *p,
+    u64 enq_flags)
+{
+    u32 target = scx_bpf_task_cpu(p);
+    u32 curr   = bpf_get_smp_processor_id();
+
+    /* 🔥 保護 kernel thread */
+    if (p->flags & PF_KTHREAD) {
+        scx_bpf_dsq_insert(p, SCX_DSQ_GLOBAL, SCX_SLICE_DFL, enq_flags);
+        return 0;
+    }
+
+    /* 🔥 正確使用 LOCAL（只有同 CPU 才能用） */
+    if (target == curr) {
+        scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
+    } else {
+        scx_bpf_dsq_insert(p, get_cpu_dsq(target),
+                           SCX_SLICE_DFL, enq_flags);
+    }
+
+    return 0;
+}
+
+/* ===================== */
+/* dispatch */
+/* ===================== */
+
+int BPF_STRUCT_OPS(adv_dispatch,
+    s32 cpu,
+    struct task_struct *prev)
+{
+    u32 nr = scx_bpf_nr_cpu_ids();
+    u32 my_dsq = get_cpu_dsq(cpu);
+
+    /* 1️⃣ 自己的 queue（affinity） */
+    if (scx_bpf_dsq_move_to_local(my_dsq))
+        return 0;
+
+    /* 2️⃣ bounded work stealing（比你原本強） */
+#pragma unroll
+    for (int i = 1; i <= 4; i++) {
+        u32 victim = (cpu + i) % nr;
+
+        if (scx_bpf_dsq_move_to_local(get_cpu_dsq(victim))) {
+            bpf_printk("CPU %d stole from %d", cpu, victim);
+            return 0;
+        }
+    }
+
+    /* 3️⃣ global fallback（避免 starvation） */
+    if (scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL))
+        return 0;
+
+    return 0;
+}
+
+/* ===================== */
+/* running */
+/* ===================== */
+
+void BPF_STRUCT_OPS(adv_running,
+    struct task_struct *p)
+{
+    /* debug 用（平常關掉） */
+    // bpf_printk("Running %s on cpu %d",
+    //            p->comm, bpf_get_smp_processor_id());
+}
+
+/* ===================== */
+/* exit */
+/* ===================== */
+
+void BPF_STRUCT_OPS(adv_exit,
+    struct scx_exit_info *info)
+{
+    bpf_printk("SCX EXIT reason=%d", info->reason);
+}
+
+/* ===================== */
+/* ops */
+/* ===================== */
+
+SEC(".struct_ops.link")
+struct sched_ext_ops adv_ops = {
+    .select_cpu = (void *)adv_select_cpu,
+    .enqueue    = (void *)adv_enqueue,
+    .dispatch   = (void *)adv_dispatch,
+    .running    = (void *)adv_running,
+    .init       = (void *)adv_init,
+    .exit       = (void *)adv_exit,
+    .name       = "adv_scx",
+    .flags      = SCX_OPS_KEEP_BUILTIN_IDLE,
+};
