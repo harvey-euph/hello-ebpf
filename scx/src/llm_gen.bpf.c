@@ -32,6 +32,7 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(study_init) {
 // 導航階段：Log 出決策過程
 s32 BPF_STRUCT_OPS(study_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
     bool is_idle;
+    bpf_printk("Select: Starting select cpu.");
     
     if (scx_bpf_test_and_clear_cpu_idle(prev_cpu)) {
         // bpf_printk("Select: Task %s back to prev_cpu %d (Idle)", p->comm, prev_cpu);
@@ -48,6 +49,7 @@ int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
     // 獲取該任務被分配到的目標 CPU (不是當前執行 enqueue 的 CPU)
     u32 target_cpu = scx_bpf_task_cpu(p);
     u32 dsq_id = CPU_DSQ_OFFSET + target_cpu;
+    bpf_printk("Enqueue: Starting enqueue.");
 
     if (enq_flags & SCX_ENQ_WAKEUP) {
         bpf_printk("Enqueue: %s (Wakeup) -> Local CPU %d", p->comm, target_cpu);
@@ -61,6 +63,7 @@ int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
 
 // 提貨階段：這是最需要 Log 的地方
 int BPF_STRUCT_OPS(study_dispatch, s32 cpu, struct task_struct *prev) {
+    bpf_printk("Dispatch: Starting dispatch.");
     u32 dsq_id = CPU_DSQ_OFFSET + cpu;
 
     // 1. 試著從自己的倉庫拿
