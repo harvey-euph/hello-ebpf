@@ -3,11 +3,7 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-// 使用 User DSQ ID，對應每個 CPU
-// 我們預留一個範圍，例如 0 ~ 511 給 CPU 私有 DSQ
 #define CPU_DSQ_OFFSET 100
-
-// 靜態定義最大支援的 CPU 數量
 #define MAX_CPUS 512
 
 #define BPF_STRUCT_OPS(name, args...)	\
@@ -17,73 +13,81 @@
     SEC("struct_ops.s/"#name)				    \
     BPF_PROG(name, ##args)
 
-// 用於追蹤每個 CPU 佇列長度的 Map (幫助做負載決策)
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, u32);
-} cpu_queue_count SEC(".maps");
-
-// 初始化：為每個 CPU 創建一個私有的 User DSQ
+// 初始化：加 Log 確認 DSQ 是否創建成功
 s32 BPF_STRUCT_OPS_SLEEPABLE(study_init) {
-    // 這裡我們假設系統 CPU 不超過 MAX_CPUS
-    for (int i = 0; i < MAX_CPUS; i++) {
+    u32 nr_cpus = scx_bpf_nr_cpu_ids();
+    scx_bpf_dump_bstr("SCX Init: Starting to create %u DSQs", nr_cpus);
+
+    for (int i = 0; i < nr_cpus && i < MAX_CPUS; i++) {
         s32 ret = scx_bpf_create_dsq(CPU_DSQ_OFFSET + i, -1);
-        if (ret) return ret;
+        if (ret) {
+            scx_bpf_dump_bstr("SCX Init Error: Failed to create DSQ %d", i);
+            return ret;
+        }
     }
+    scx_bpf_dump_bstr("SCX Init: Success");
     return 0;
 }
 
-// 1. 導航階段：盡量選上次跑過的 CPU
+// 導航階段：Log 出決策過程
 s32 BPF_STRUCT_OPS(study_select_cpu, struct task_struct *p, s32 prev_cpu, u64 wake_flags) {
-    bool is_idle; // 定義一個變數來接收閒置狀態
+    bool is_idle;
     
     if (scx_bpf_test_and_clear_cpu_idle(prev_cpu)) {
+        // scx_bpf_dump_bstr("Select: Task %s back to prev_cpu %d (Idle)", p->comm, prev_cpu);
         return prev_cpu;
     }
     
-    // 傳入第 4 個參數 &is_idle
-    return scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+    s32 target = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, &is_idle);
+    // scx_bpf_dump_bstr("Select: Task %s -> target %d", p->comm, target);
+    return target;
 }
 
-// 2. 入庫階段：根據目標 CPU 狀態決定去向
+// 入庫階段：Log 任務被丟進哪個倉庫
 int BPF_STRUCT_OPS(study_enqueue, struct task_struct *p, u64 enq_flags) {
-    u32 cpu = bpf_get_smp_processor_id();
-    u32 dsq_id = CPU_DSQ_OFFSET + cpu;
+    // 獲取該任務被分配到的目標 CPU (不是當前執行 enqueue 的 CPU)
+    u32 target_cpu = scx_bpf_task_cpu(p);
+    u32 dsq_id = CPU_DSQ_OFFSET + target_cpu;
 
     if (enq_flags & SCX_ENQ_WAKEUP) {
+        // scx_bpf_dump_bstr("Enqueue: %s (Wakeup) -> Local CPU %d", p->comm, target_cpu);
         scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, SCX_SLICE_DFL, enq_flags);
     } else {
+        // scx_bpf_dump_bstr("Enqueue: %s -> User DSQ %u", p->comm, dsq_id);
         scx_bpf_dsq_insert(p, dsq_id, SCX_SLICE_DFL, enq_flags);
     }
     return 0;
 }
 
-// 3. 提貨階段：當 Local DSQ 空了
+// 提貨階段：這是最需要 Log 的地方
 int BPF_STRUCT_OPS(study_dispatch, s32 cpu, struct task_struct *prev) {
     u32 dsq_id = CPU_DSQ_OFFSET + cpu;
 
-    // 1. 從自己的 User DSQ 搬貨到 Local DSQ
-    // 如果成功搬運，回傳值會是 true (非零)
+    // 1. 試著從自己的倉庫拿
     if (scx_bpf_dsq_move_to_local(dsq_id)) {
+        // scx_bpf_dump_bstr("Dispatch: CPU %d consumed from own DSQ %u", cpu, dsq_id);
         return 0;
     }
 
-    // 2. 嘗試從鄰居 CPU 的 DSQ 偷貨
-    u32 neighbor_cpu = (cpu + 1) % scx_bpf_nr_cpu_ids(); // 使用你 list 中的 scx_bpf_nr_cpu_ids() 更精準
+    // 2. 試著偷別人的
+    u32 neighbor_cpu = (cpu + 1) % scx_bpf_nr_cpu_ids();
     if (scx_bpf_dsq_move_to_local(CPU_DSQ_OFFSET + neighbor_cpu)) {
+        scx_bpf_dump_bstr("Dispatch: CPU %d STOLE from CPU %d", cpu, neighbor_cpu);
         return 0;
     }
 
-    // 3. 從全局隊列搬貨
-    scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL);
+    // 3. 全局保底
+    if (scx_bpf_dsq_move_to_local(SCX_DSQ_GLOBAL)) {
+        // scx_bpf_dump_bstr("Dispatch: CPU %d picked from Global", cpu);
+        return 0;
+    }
     
     return 0;
 }
-// 紀錄任務開始跑的瞬間
+
 void BPF_STRUCT_OPS(study_running, struct task_struct *p) {
-    // 可以在這裡紀錄時間戳，或是增加該 CPU 的計數器
+    // 這裡頻率太高，平時建議註解掉，只在抓不到任務跑時開啟
+    // scx_bpf_dump_bstr("Running: %s on CPU %d", p->comm, bpf_get_smp_processor_id());
 }
 
 SEC(".struct_ops.link")
@@ -94,7 +98,6 @@ struct sched_ext_ops sched_ops = {
     .running    = (void *)study_running,
     .init       = (void *)study_init,
     .name       = "study_advanced_scheduler",
-    // 這裡我們不加 SCX_OPS_ENQ_LAST，讓我們能完全控制 enqueue 
     .flags      = SCX_OPS_KEEP_BUILTIN_IDLE, 
 };
 
