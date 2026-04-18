@@ -6,6 +6,12 @@
 #define MAX_CPUS 256
 #define CPU_DSQ_BASE 1000
 
+#define BPF_STRUCT_OPS(name, args...) \ 
+    SEC("struct_ops/"#name) BPF_PROG(name, ##args) 
+
+#define BPF_STRUCT_OPS_SLEEPABLE(name, args...) \ 
+    SEC("struct_ops.s/"#name) BPF_PROG(name, ##args)
+
 char _license[] SEC("license") = "GPL";
 
 /* ===================== */
